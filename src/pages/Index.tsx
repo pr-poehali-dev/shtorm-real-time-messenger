@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ChatList from '../components/ChatList';
 import ChatWindow from '../components/ChatWindow';
 import Sidebar from '../components/Sidebar';
+import AuthScreen from '../components/AuthScreen';
 import Icon from '@/components/ui/icon';
 
 export interface Message {
@@ -30,103 +31,155 @@ export interface Contact {
   online: boolean;
 }
 
+const API_AUTH = 'https://functions.poehali.dev/d758c927-0136-4b21-9db3-96b968cfd804';
+const API_CHATS = 'https://functions.poehali.dev/b369a9ca-10e6-4dd9-ae9e-599d469eed97';
+
 export default function Index() {
+  const [userId, setUserId] = useState<number | null>(null);
+  const [userData, setUserData] = useState<any>(null);
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [activePage, setActivePage] = useState<'chats' | 'contacts' | 'profile'>('chats');
 
-  const [chats] = useState<Chat[]>([
-    {
-      id: '1',
-      name: 'Анна Смирнова',
-      avatar: '👩‍💼',
-      lastMessage: 'Встретимся завтра?',
-      timestamp: '14:32',
-      unread: 2,
-      online: true,
-    },
-    {
-      id: '2',
-      name: 'Команда Shtorm',
-      avatar: '⚡',
-      lastMessage: 'Новое обновление доступно',
-      timestamp: '13:15',
-      unread: 0,
-      online: false,
-    },
-    {
-      id: '3',
-      name: 'Михаил Петров',
-      avatar: '👨‍💻',
-      lastMessage: 'Отправил файлы',
-      timestamp: 'Вчера',
-      unread: 0,
-      online: false,
-    },
-  ]);
+  const [chats, setChats] = useState<Chat[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [messages, setMessages] = useState<Record<string, Message[]>>({});
 
-  const [contacts] = useState<Contact[]>([
-    { id: '1', name: 'Анна Смирнова', avatar: '👩‍💼', status: 'В сети', online: true },
-    { id: '2', name: 'Михаил Петров', avatar: '👨‍💻', status: 'Был недавно', online: false },
-    { id: '3', name: 'Елена Волкова', avatar: '👩‍🎨', status: 'В сети', online: true },
-    { id: '4', name: 'Дмитрий Иванов', avatar: '👨‍🔬', status: 'Был 2 часа назад', online: false },
-  ]);
+  useEffect(() => {
+    const savedUserId = localStorage.getItem('shtorm_user_id');
+    const savedUserData = localStorage.getItem('shtorm_user_data');
+    
+    if (savedUserId && savedUserData) {
+      setUserId(parseInt(savedUserId));
+      setUserData(JSON.parse(savedUserData));
+    }
+  }, []);
 
-  const [messages, setMessages] = useState<Record<string, Message[]>>({
-    '1': [
-      {
-        id: '1',
-        text: 'Привет! Как дела?',
-        sender: 'contact',
-        timestamp: new Date(Date.now() - 3600000),
-        encrypted: true,
-      },
-      {
-        id: '2',
-        text: 'Отлично! Работаю над новым проектом',
-        sender: 'user',
-        timestamp: new Date(Date.now() - 3000000),
-        encrypted: true,
-      },
-      {
-        id: '3',
-        text: 'Звучит интересно! Расскажешь подробнее?',
-        sender: 'contact',
-        timestamp: new Date(Date.now() - 2400000),
-        encrypted: true,
-      },
-      {
-        id: '4',
-        text: 'Конечно! Это защищенный мессенджер с шифрованием',
-        sender: 'user',
-        timestamp: new Date(Date.now() - 1800000),
-        encrypted: true,
-      },
-      {
-        id: '5',
-        text: 'Встретимся завтра?',
-        sender: 'contact',
-        timestamp: new Date(Date.now() - 600000),
-        encrypted: true,
-      },
-    ],
-  });
+  useEffect(() => {
+    if (!userId) return;
 
-  const handleSendMessage = (text: string) => {
-    if (!activeChat) return;
+    loadChats();
+    loadContacts();
 
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      text,
-      sender: 'user',
-      timestamp: new Date(),
-      encrypted: true,
-    };
+    const interval = setInterval(() => {
+      loadChats();
+      if (activeChat) {
+        loadMessages(activeChat);
+      }
+    }, 3000);
 
-    setMessages((prev) => ({
-      ...prev,
-      [activeChat]: [...(prev[activeChat] || []), newMessage],
-    }));
+    return () => clearInterval(interval);
+  }, [userId, activeChat]);
+
+  const loadChats = async () => {
+    try {
+      const response = await fetch(`${API_CHATS}?action=chats`, {
+        headers: {
+          'X-User-Id': userId!.toString(),
+        },
+      });
+      const data = await response.json();
+      setChats(data.chats || []);
+    } catch (err) {
+      console.error('Failed to load chats', err);
+    }
   };
+
+  const loadContacts = async () => {
+    try {
+      const response = await fetch(`${API_CHATS}?action=contacts`, {
+        headers: {
+          'X-User-Id': userId!.toString(),
+        },
+      });
+      const data = await response.json();
+      setContacts(data.contacts || []);
+    } catch (err) {
+      console.error('Failed to load contacts', err);
+    }
+  };
+
+  const loadMessages = async (chatId: string) => {
+    try {
+      const response = await fetch(`${API_CHATS}?action=messages&chat_id=${chatId}`, {
+        headers: {
+          'X-User-Id': userId!.toString(),
+        },
+      });
+      const data = await response.json();
+      const msgs = data.messages || [];
+      setMessages((prev) => ({
+        ...prev,
+        [chatId]: msgs.map((m: any) => ({
+          ...m,
+          timestamp: new Date(m.timestamp),
+        })),
+      }));
+    } catch (err) {
+      console.error('Failed to load messages', err);
+    }
+  };
+
+  const handleChatSelect = (chatId: string) => {
+    setActiveChat(chatId);
+    loadMessages(chatId);
+  };
+
+  const handleContactClick = async (contactId: number) => {
+    try {
+      const response = await fetch(API_CHATS, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Id': userId!.toString(),
+        },
+        body: JSON.stringify({
+          action: 'create_chat',
+          user_id: contactId,
+        }),
+      });
+      const data = await response.json();
+      await loadChats();
+      setActiveChat(data.chat_id.toString());
+      setActivePage('chats');
+    } catch (err) {
+      console.error('Failed to create chat', err);
+    }
+  };
+
+  const handleSendMessage = async (text: string) => {
+    if (!activeChat || !userId) return;
+
+    try {
+      const response = await fetch(API_CHATS, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Id': userId.toString(),
+        },
+        body: JSON.stringify({
+          action: 'send_message',
+          chat_id: parseInt(activeChat),
+          text,
+        }),
+      });
+
+      if (response.ok) {
+        await loadMessages(activeChat);
+        await loadChats();
+      }
+    } catch (err) {
+      console.error('Failed to send message', err);
+    }
+  };
+
+  const handleAuth = (id: number, data: any) => {
+    setUserId(id);
+    setUserData(data);
+  };
+
+  if (!userId) {
+    return <AuthScreen onAuth={handleAuth} />;
+  }
 
   const selectedChat = chats.find((chat) => chat.id === activeChat);
   const chatMessages = activeChat ? messages[activeChat] || [] : [];
@@ -140,7 +193,7 @@ export default function Index() {
           <ChatList
             chats={chats}
             activeChat={activeChat}
-            onChatSelect={setActiveChat}
+            onChatSelect={handleChatSelect}
           />
           <ChatWindow
             chat={selectedChat}
@@ -167,6 +220,7 @@ export default function Index() {
             {contacts.map((contact) => (
               <div
                 key={contact.id}
+                onClick={() => handleContactClick(contact.id)}
                 className="flex items-center gap-4 p-4 hover:bg-accent rounded-lg cursor-pointer transition-colors"
               >
                 <div className="relative">
@@ -192,11 +246,11 @@ export default function Index() {
           <div className="max-w-md w-full space-y-6">
             <div className="flex flex-col items-center gap-4">
               <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center text-5xl">
-                👤
+                {userData?.avatar || '👤'}
               </div>
               <div className="text-center">
-                <h2 className="text-2xl font-semibold">Мой Профиль</h2>
-                <p className="text-muted-foreground">+7 999 123 45 67</p>
+                <h2 className="text-2xl font-semibold">{userData?.name || 'Мой Профиль'}</h2>
+                <p className="text-muted-foreground">{userData?.phone || '+7 999 123 45 67'}</p>
               </div>
             </div>
             
